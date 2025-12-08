@@ -47,13 +47,29 @@ function parseConfig(authHeader, modelParam) {
 
   // 方式一：所有信息都在 Authorization header 中
   if (tokenParts.length >= 3) {
-    const [difyApiUrl, apiKey, botType, inputVariable, outputVariable] = tokenParts;
+    // 支持6个参数，最后一个可以是 user
+    let difyApiUrl, apiKey, botType, inputVariable, outputVariable, user;
+
+    log("debug", "Token parts length", { length: tokenParts.length, parts: tokenParts });
+
+    if (tokenParts.length >= 6) {
+      // 6个参数：DIFY_API_URL|API_KEY|BOT_TYPE|INPUT_VARIABLE|OUTPUT_VARIABLE|USER
+      [difyApiUrl, apiKey, botType, inputVariable, outputVariable, user] = tokenParts;
+      log("debug", "解析6个参数", { user });
+    } else {
+      // 5个参数：DIFY_API_URL|API_KEY|BOT_TYPE|INPUT_VARIABLE|OUTPUT_VARIABLE
+      [difyApiUrl, apiKey, botType, inputVariable, outputVariable] = tokenParts;
+      user = null;
+      log("debug", "解析5个参数，user为null");
+    }
+
     config = {
       DIFY_API_URL: difyApiUrl,
       API_KEY: apiKey,
       BOT_TYPE: botType,
       INPUT_VARIABLE: inputVariable || "",
       OUTPUT_VARIABLE: outputVariable || "",
+      USER: user || null,
     };
     log("info", "配置解析成功 - 方式一", config);
     return config;
@@ -62,7 +78,7 @@ function parseConfig(authHeader, modelParam) {
   // 方式二和方式三的处理
   if (tokenParts.length === 1) {
     const singleValue = tokenParts[0].trim();
-    
+
     // 解析 model 参数
     if (!modelParam) {
       log("error", "缺少 model 参数");
@@ -75,6 +91,12 @@ function parseConfig(authHeader, modelParam) {
       throw new Error("Invalid model parameter format");
     }
 
+    // 检查 model 参数中是否包含 user（最后一个参数）
+    let user = null;
+    if (modelParts.length >= 6 && (modelParts[5] || modelParts[5] !== "")) {
+      user = modelParts[5];
+    }
+
     // 方式二：Authorization 是 API_KEY
     if (singleValue.length > 0 && !singleValue.includes("http")) {
       config.API_KEY = singleValue;
@@ -83,6 +105,7 @@ function parseConfig(authHeader, modelParam) {
       config.BOT_TYPE = botType;
       config.INPUT_VARIABLE = inputVariable || "";
       config.OUTPUT_VARIABLE = outputVariable || "";
+      config.USER = user;
       log("info", "配置解析成功 - 方式二", config);
     }
     // 方式三：Authorization 是 DIFY_API_URL
@@ -93,6 +116,7 @@ function parseConfig(authHeader, modelParam) {
       config.BOT_TYPE = botType;
       config.INPUT_VARIABLE = inputVariable || "";
       config.OUTPUT_VARIABLE = outputVariable || "";
+      config.USER = user;
       log("info", "配置解析成功 - 方式三", config);
     }
   }

@@ -2,6 +2,7 @@
 
 import fetch from "node-fetch";
 import { PassThrough } from "stream";
+import FormData from "form-data";
 import { log } from '../config/logger.js';
 import { logApiCall, generateId, getFileExtension, getFileType } from "./utils.js";
 
@@ -30,10 +31,29 @@ async function uploadFileToDify(base64Data, config, userId) {
 
     // 创建 FormData 并包含 'user' 字段
     const form = new FormData();
-    form.append("file", fileData, {
-      filename: filename,
-      contentType: contentType,
-    });
+    // 确保 fileData 是 Buffer 类型
+    if (typeof fileData === 'string') {
+      fileData = Buffer.from(fileData);
+    }
+
+    // 尝试直接使用 Buffer，如果失败则转换为 base64 字符串
+    try {
+      form.append("file", fileData, {
+        filename: filename,
+        contentType: contentType,
+      });
+      log("debug", "使用 Buffer 上传文件", { userId });
+    } catch (e) {
+      log("warn", "Buffer 上传失败，尝试使用 base64 字符串", {
+        error: e.message,
+        requestId: userId,
+      });
+      form.append("file", fileData.toString('base64'), {
+        filename: filename,
+        contentType: contentType,
+      });
+    }
+
     form.append("user", userId); // 使用提供的用户标识符
 
     // 记录文件上传请求的详细信息
@@ -99,7 +119,8 @@ async function handleRequest(req, res, config, requestId, startTime) {
       body: data,
     });
 
-    const userId = "apiuser"; // 如果可用，替换为实际的用户 ID
+    // 优先使用 config.USER，然后是请求中的 user，最后是默认值
+    const userId = config.USER || data.user || "apiuser";
     const lastMessage = messages[messages.length - 1];
     
     // 第一步：先扫描所有消息中的图片内容
@@ -127,7 +148,11 @@ async function handleRequest(req, res, config, requestId, startTime) {
                 upload_file_id: fileId,
                 type: fileType,
               };
-              inputs["file_input"] = fileInput;
+              // file_input 必须是数组
+              if (!inputs["file_input"]) {
+                inputs["file_input"] = [];
+              }
+              inputs["file_input"].push(fileInput);
             } else {
               // 是真正的URL，直接使用remote_url方式
               const fileExt = getFileExtension(imageUrl);
@@ -138,7 +163,11 @@ async function handleRequest(req, res, config, requestId, startTime) {
                 url: imageUrl,
                 type: fileType,
               };
-              inputs["file_input"] = fileInput;
+              // file_input 必须是数组
+              if (!inputs["file_input"]) {
+                inputs["file_input"] = [];
+              }
+              inputs["file_input"].push(fileInput);
             }
           }
         }
@@ -151,18 +180,18 @@ async function handleRequest(req, res, config, requestId, startTime) {
         // 处理字符串类型的内容（OpenAI格式）
         if (typeof content === "string") {
           // 将字符串类型的内容设置为输入变量
-          inputs["text_input"] = content;
+          inputs[config.INPUT_VARIABLE || "text_input"] = content;
         }
         // 处理对象类型的内容
         else if (content.type === "text") {
           // 假设文本内容是输入变量，需要根据您的应用逻辑调整
-          inputs["text_input"] = content.text;
+          inputs[config.INPUT_VARIABLE || "text_input"] = content.text;
         }
         // 注意：这里不再重复处理image_url，因为已经在上面处理过了
       }
     } else {
       // 假设消息内容是输入变量，需要根据您的应用逻辑调整
-      inputs["text_input"] = lastMessage.content;
+      inputs[config.INPUT_VARIABLE || "text_input"] = lastMessage.content;
     }
 
     // 日志记录
@@ -177,7 +206,7 @@ async function handleRequest(req, res, config, requestId, startTime) {
     // 构建请求体
     const requestBody = {
       inputs: inputs,
-      response_mode: "streaming",
+      response_mode: stream ? "streaming" : "blocking",
       user: userId,
       files: files, // 如果需要，可以将 files 数组添加到请求体中
     };
@@ -226,6 +255,13 @@ async function handleRequest(req, res, config, requestId, startTime) {
       res.status(resp.status).send(errorBody);
       return;
     }
+
+    // 记录响应头信息
+    log("info", "Dify 响应头信息", {
+      requestId,
+      headers: Object.fromEntries(resp.headers.entries()),
+      contentType: resp.headers.get('content-type'),
+    });
 
     let isResponseEnded = false;
 
@@ -340,10 +376,75 @@ async function handleRequest(req, res, config, requestId, startTime) {
         timestamp: new Date().toISOString(),
       });
 
+      // 检查是否是直接的 JSON 响应（blocking 模式）
+      const contentType = resp.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        // 直接解析 JSON 响应
+        const jsonData = await resp.json();
+        log("info", "收到 JSON 响应", {
+          requestId,
+          data: jsonData,
+        });
+
+        if (jsonData.data && jsonData.data.outputs) {
+          const outputs = jsonData.data.outputs;
+          if (config.OUTPUT_VARIABLE) {
+            result = outputs[config.OUTPUT_VARIABLE];
+            log("info", "提取指定的 OUTPUT_VARIABLE", {
+              requestId,
+              OUTPUT_VARIABLE: config.OUTPUT_VARIABLE,
+              result,
+            });
+          } else {
+            result = outputs;
+            log("info", "使用整个 outputs 对象", {
+              requestId,
+              result,
+            });
+          }
+          usageData = {
+            total_tokens: jsonData.data.total_tokens || 110,
+          };
+        }
+
+        // 发送响应
+        const formattedResponse = {
+          id: `chatcmpl-${generateId()}`,
+          object: "chat.completion",
+          created: Math.floor(Date.now() / 1000),
+          model: data.model,
+          choices: [
+            {
+              index: 0,
+              message: {
+                role: "assistant",
+                content: result,
+              },
+              logprobs: null,
+              finish_reason: "stop",
+            },
+          ],
+          usage: usageData,
+          system_fingerprint: "fp_2f57f81c11",
+        };
+
+        res.set("Content-Type", "application/json");
+        res.json(formattedResponse);
+        logApiCall(requestId, config, apiPath, Date.now() - startTime);
+        return;
+      }
+
+      // 否则按流式处理
       const responseStream = resp.body;
       responseStream.on("data", (chunk) => {
         buffer += chunk.toString();
         let lines = buffer.split("\n");
+
+        log("debug", "收到响应数据", {
+          requestId,
+          chunkText: chunk.toString().substring(0, 200),
+          bufferLength: buffer.length,
+        });
 
         for (let i = 0; i < lines.length - 1; i++) {
           const line = lines[i].trim();
@@ -354,10 +455,18 @@ async function handleRequest(req, res, config, requestId, startTime) {
             if (cleanedLine.startsWith("{") && cleanedLine.endsWith("}")) {
               chunkObj = JSON.parse(cleanedLine);
             } else {
+              log("debug", "跳过非JSON行", {
+                requestId,
+                line: line.substring(0, 100),
+              });
               continue;
             }
           } catch (error) {
-            console.error("解析 JSON 出错:", error);
+            log("error", "解析 JSON 出错", {
+              requestId,
+              error: error.message,
+              line: line.substring(0, 100),
+            });
             continue;
           }
 
@@ -369,10 +478,26 @@ async function handleRequest(req, res, config, requestId, startTime) {
 
           if (chunkObj.event === "workflow_finished") {
             const outputs = chunkObj.data.outputs;
+            log("info", "收到 workflow_finished 事件", {
+              requestId,
+              outputs,
+              OUTPUT_VARIABLE: config.OUTPUT_VARIABLE,
+            });
+
             if (config.OUTPUT_VARIABLE) {
               result = outputs[config.OUTPUT_VARIABLE];
+              log("info", "提取指定的 OUTPUT_VARIABLE", {
+                requestId,
+                OUTPUT_VARIABLE: config.OUTPUT_VARIABLE,
+                result,
+                resultType: typeof result,
+              });
             } else {
               result = outputs;
+              log("info", "使用整个 outputs 对象", {
+                requestId,
+                result,
+              });
             }
             usageData = {
               total_tokens: chunkObj.data.total_tokens || 110,

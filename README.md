@@ -103,6 +103,58 @@ npm run pm2:delete
 npm run pm2:monit
 ```
 
+### 环境切换
+
+项目支持开发和生产两种环境，通过 `NODE_ENV` 环境变量控制：
+
+#### 启动服务时指定环境
+
+```bash
+# 启动开发环境（显示详细日志）
+npm run pm2:dev
+
+# 启动生产环境（仅显示错误日志）
+npm run pm2:prod
+```
+
+#### 运行时切换环境
+
+```bash
+# 切换到开发环境
+npm run pm2:switch-dev
+
+# 切换到生产环境
+npm run pm2:switch-prod
+```
+
+#### 环境特性说明
+
+- **开发环境**：
+  - 记录所有级别的日志（debug、info、warn、error）
+  - 日志同时输出到控制台和文件
+  - 适合调试和开发阶段使用
+
+- **生产环境**：
+  - 仅记录错误级别的日志
+  - 日志仅在控制台显示
+  - 减少日志输出，提高生产环境性能
+
+#### 手动环境切换
+
+如果不使用npm脚本，也可以手动切换环境：
+
+```bash
+# 切换到开发环境
+pm2 delete dify2openai
+pm2 start ecosystem.config.cjs --env development
+
+# 切换到生产环境
+pm2 delete dify2openai
+pm2 start ecosystem.config.cjs --env production
+```
+
+注意：必须通过 `ecosystem.config.cjs` 文件启动才能正确加载环境配置。
+
 ---
 
 ## 一键部署
