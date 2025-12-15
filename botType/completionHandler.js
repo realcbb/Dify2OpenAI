@@ -142,42 +142,85 @@ async function handleRequest(req, res, config, requestId, startTime) {
       }
     }
 
-    // 第二步：从最后一条消息中提取查询文本
+    // 第二步：从消息中提取系统提示和用户查询文本
+    let systemPrompt = "";
+    let userQuery = "";
     const lastMessage = messages[messages.length - 1];
-    if (Array.isArray(lastMessage.content)) {
-      for (const content of lastMessage.content) {
-        // 处理字符串类型的内容（OpenAI格式）
-        if (typeof content === "string") {
-          queryString += content + "\n";
-        } 
-        // 处理对象类型的内容
-        else if (content.type === "text") {
-          queryString += content.text + "\n";
+
+    // 提取系统消息（role为system的消息）
+    for (const message of messages) {
+      if (message.role === "system") {
+        if (Array.isArray(message.content)) {
+          for (const content of message.content) {
+            if (typeof content === "string") {
+              systemPrompt += content + "\n";
+            } else if (content.type === "text") {
+              systemPrompt += content.text + "\n";
+            }
+          }
+        } else {
+          systemPrompt += message.content + "\n";
         }
-        // 注意：这里不再重复处理image_url，因为已经在上面处理过了
       }
-      queryString = queryString.trim(); // 去除末尾的换行符
-    } else {
-      queryString = lastMessage.content;
+    }
+
+    // 正确提取用户查询文本：扫描所有消息，找到用户文本内容
+    for (const message of messages) {
+      if (message.role === "user") {
+        if (Array.isArray(message.content)) {
+          for (const content of message.content) {
+            // 处理字符串类型的内容（OpenAI格式）
+            if (typeof content === "string") {
+              userQuery += content + "\n";
+            }
+            // 处理对象类型的内容
+            else if (content.type === "text") {
+              userQuery += content.text + "\n";
+            }
+            // 注意：这里不再重复处理image_url，因为已经在上面处理过了
+          }
+        } else {
+          userQuery += message.content + "\n";
+        }
+      }
+    }
+    userQuery = userQuery.trim(); // 去除末尾的换行符
+
+    // 设置输入变量
+    systemPrompt = systemPrompt.trim();
+    userQuery = userQuery.trim();
+
+    // 如果存在 SYSTEM_INPUT_VARIABLE，则分别设置系统提示和用户查询
+    let inputs = {};
+    if (config.SYSTEM_INPUT_VARIABLE && systemPrompt) {
+      inputs[config.SYSTEM_INPUT_VARIABLE] = systemPrompt;
+      log("debug", "设置系统提示", {
+        requestId,
+        systemInputKey: config.SYSTEM_INPUT_VARIABLE,
+        systemPrompt
+      });
+    }
+
+    // 设置用户查询
+    inputs[config.INPUT_VARIABLE || "query"] = userQuery;
+
+    // 如果没有分离的系统提示词，但有系统消息，则将其添加到用户查询前面
+    if (!config.SYSTEM_INPUT_VARIABLE && systemPrompt) {
+      inputs[config.INPUT_VARIABLE || "query"] = systemPrompt + "\n\n" + userQuery;
     }
 
     // 日志记录
     log("info", "处理 Completion 类型消息", {
       requestId,
-      contentLength: queryString.length,
-      queryString,
+      inputs,
       files,
     });
 
     const stream = data.stream !== undefined ? data.stream : false;
-    let requestBody;
-
-    // 如果指定了 INPUT_VARIABLE，则使用它作为键，否则默认使用 'query'
-    const inputKey = config.INPUT_VARIABLE || "query";
 
     // 构建请求体
-    requestBody = {
-      inputs: { [inputKey]: queryString },
+    const requestBody = {
+      inputs: inputs,
       response_mode: "streaming",
       user: userId,
       files: files,

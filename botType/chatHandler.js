@@ -146,27 +146,53 @@ async function handleRequest(req, res, config, requestId, startTime) {
       }
     }
     
-    // 第二步：从最后一条消息中提取查询文本
-    if (Array.isArray(lastMessage.content)) {
-      for (const content of lastMessage.content) {
-        // 处理字符串类型的内容（OpenAI格式）
-        if (typeof content === "string") {
-          queryString += content + "\n";
-        } 
-        // 处理对象类型的内容
-        else if (content.type === "text") {
-          queryString += content.text + "\n";
+    // 第二步：从消息中提取系统提示和用户查询文本
+    let systemPrompt = "";
+    let userQuery = "";
+
+    // 提取系统消息（role为system的消息）
+    for (const message of messages) {
+      if (message.role === "system") {
+        if (Array.isArray(message.content)) {
+          for (const content of message.content) {
+            if (typeof content === "string") {
+              systemPrompt += content + "\n";
+            } else if (content.type === "text") {
+              systemPrompt += content.text + "\n";
+            }
+          }
+        } else {
+          systemPrompt += message.content + "\n";
         }
-        // 注意：这里不再重复处理image_url，因为已经在上面处理过了
       }
-      queryString = queryString.trim(); // 去除末尾的换行符
-    } else {
-      queryString = lastMessage.content;
     }
 
-    // 构建对话历史，不包括最后一条消息
+    // 正确提取用户查询文本：扫描所有消息，找到用户文本内容
+    for (const message of messages) {
+      if (message.role === "user") {
+        if (Array.isArray(message.content)) {
+          for (const content of message.content) {
+            // 处理字符串类型的内容（OpenAI格式）
+            if (typeof content === "string") {
+              userQuery += content + "\n";
+            }
+            // 处理对象类型的内容
+            else if (content.type === "text") {
+              userQuery += content.text + "\n";
+            }
+            // 注意：这里不再重复处理image_url，因为已经在上面处理过了
+          }
+        } else {
+          userQuery += message.content + "\n";
+        }
+      }
+    }
+    userQuery = userQuery.trim(); // 去除末尾的换行符
+
+    // 构建对话历史，不包括最后一条消息和系统消息
     const history = messages
       .slice(0, -1)
+      .filter(message => message.role !== "system") // 过滤掉系统消息
       .map((message) => {
         // 处理可能为数组的消息内容
         let contentText = "";
@@ -185,9 +211,35 @@ async function handleRequest(req, res, config, requestId, startTime) {
       })
       .join("\n");
 
-    // 如果存在历史记录，将其包含在 queryString 中
+    // 如果存在历史记录，将其包含在 userQuery 中
     if (history) {
-      queryString = `Here is our talk history:\n'''\n${history}\n'''\n\nHere is my question:\n${queryString}`;
+      userQuery = `Here is our talk history:\n'''\n${history}\n'''\n\nHere is my question:\n${userQuery}`;
+    }
+
+    // 设置输入变量
+    systemPrompt = systemPrompt.trim();
+    userQuery = userQuery.trim();
+
+    // 为 Dify 准备请求体
+    let inputs = {};
+
+    // 如果存在 SYSTEM_INPUT_VARIABLE，则分别设置系统提示和用户查询
+    if (config.SYSTEM_INPUT_VARIABLE && systemPrompt) {
+      inputs[config.SYSTEM_INPUT_VARIABLE] = systemPrompt;
+      log("debug", "设置系统提示", {
+        requestId,
+        systemInputKey: config.SYSTEM_INPUT_VARIABLE,
+        systemPrompt
+      });
+    }
+
+    // Chat bot 使用 query 作为主要参数
+    if (config.SYSTEM_INPUT_VARIABLE && systemPrompt) {
+      // 如果有分离的系统提示，则将系统提示和用户查询合并到 query 中
+      inputs.query = systemPrompt + "\n\n" + userQuery;
+    } else {
+      // 如果没有分离的系统提示，直接使用原来的逻辑
+      inputs.query = userQuery;
     }
 
     // 记录消息处理
@@ -196,7 +248,7 @@ async function handleRequest(req, res, config, requestId, startTime) {
       messageCount: messages.length,
       lastMessageRole: lastMessage.role,
       hasFiles: files.length > 0,
-      queryString,
+      inputs,
       files,
     });
 
@@ -204,8 +256,8 @@ async function handleRequest(req, res, config, requestId, startTime) {
 
     // 为 Dify 准备请求体
     const requestBody = {
-      inputs: {},
-      query: queryString,
+      inputs: inputs,
+      query: inputs.query,
       response_mode: "streaming",
       conversation_id: "", // 如果可用，使用现有的 conversation_id
       user: userId, // 确保一致的 'user' 标识符

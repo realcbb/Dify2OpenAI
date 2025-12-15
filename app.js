@@ -63,11 +63,25 @@ function parseConfig(authHeader, modelParam) {
       log("debug", "解析5个参数，user为null");
     }
 
+    // 解析 INPUT_VARIABLE - 检查是否包含英文逗号
+    let systemInputKey = null;
+    let userInputKey = inputVariable || "";
+
+    if (inputVariable && inputVariable.includes(',')) {
+      const parts = inputVariable.split(',').map(part => part.trim());
+      if (parts.length >= 2) {
+        systemInputKey = parts[0];
+        userInputKey = parts[1];
+        log("debug", "INPUT_VARIABLE 包含逗号，已分离", { systemInputKey, userInputKey });
+      }
+    }
+
     config = {
       DIFY_API_URL: difyApiUrl,
       API_KEY: apiKey,
       BOT_TYPE: botType,
-      INPUT_VARIABLE: inputVariable || "",
+      INPUT_VARIABLE: userInputKey || "",
+      SYSTEM_INPUT_VARIABLE: systemInputKey,
       OUTPUT_VARIABLE: outputVariable || "",
       USER: user || null,
     };
@@ -103,7 +117,22 @@ function parseConfig(authHeader, modelParam) {
       const [_, botType, difyApiUrl, inputVariable, outputVariable] = modelParts;
       config.DIFY_API_URL = difyApiUrl;
       config.BOT_TYPE = botType;
-      config.INPUT_VARIABLE = inputVariable || "";
+
+      // 解析 INPUT_VARIABLE - 检查是否包含英文逗号
+      let systemInputKey = null;
+      let userInputKey = inputVariable || "";
+
+      if (inputVariable && inputVariable.includes(',')) {
+        const parts = inputVariable.split(',').map(part => part.trim());
+        if (parts.length >= 2) {
+          systemInputKey = parts[0];
+          userInputKey = parts[1];
+          log("debug", "INPUT_VARIABLE 包含逗号，已分离", { systemInputKey, userInputKey });
+        }
+      }
+
+      config.INPUT_VARIABLE = userInputKey || "";
+      config.SYSTEM_INPUT_VARIABLE = systemInputKey;
       config.OUTPUT_VARIABLE = outputVariable || "";
       config.USER = user;
       log("info", "配置解析成功 - 方式二", config);
@@ -114,7 +143,22 @@ function parseConfig(authHeader, modelParam) {
       const [_, apiKey, botType, inputVariable, outputVariable] = modelParts;
       config.API_KEY = apiKey;
       config.BOT_TYPE = botType;
-      config.INPUT_VARIABLE = inputVariable || "";
+
+      // 解析 INPUT_VARIABLE - 检查是否包含英文逗号
+      let systemInputKey = null;
+      let userInputKey = inputVariable || "";
+
+      if (inputVariable && inputVariable.includes(',')) {
+        const parts = inputVariable.split(',').map(part => part.trim());
+        if (parts.length >= 2) {
+          systemInputKey = parts[0];
+          userInputKey = parts[1];
+          log("debug", "INPUT_VARIABLE 包含逗号，已分离", { systemInputKey, userInputKey });
+        }
+      }
+
+      config.INPUT_VARIABLE = userInputKey || "";
+      config.SYSTEM_INPUT_VARIABLE = systemInputKey;
       config.OUTPUT_VARIABLE = outputVariable || "";
       config.USER = user;
       log("info", "配置解析成功 - 方式三", config);

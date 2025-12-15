@@ -182,17 +182,30 @@ pm2 start ecosystem.config.cjs --env production
 **Authorization Header 格式：**
 
 ```
-Authorization: Bearer DIFY_API_URL|API_KEY|BOT_TYPE|INPUT_VARIABLE|OUTPUT_VARIABLE
+Authorization: Bearer DIFY_API_URL|API_KEY|BOT_TYPE|INPUT_VARIABLE|OUTPUT_VARIABLE|USER
 ```
 
 - 所有配置信息都通过 Authorization Header 传递。
 - `model` 参数设置为 `dify`。
+- **新功能**：`INPUT_VARIABLE` 支持英文逗号分隔，格式为 `SYSTEM_INPUT_VARIABLE,USER_INPUT_VARIABLE`。
+  - 如果包含逗号，则第一个部分作为系统提示词的变量名，第二个部分作为用户提示词的变量名。
+  - 如果不包含逗号，则保持原逻辑，直接作为用户提示词的变量名。
 
 **示例：**
 
 ```bash
 Authorization: Bearer https://cloud.dify.ai/v1|app-xxxx|Chat
 ```
+
+**使用逗号分隔的示例：**
+
+```bash
+Authorization: Bearer https://cloud.dify.ai/v1|app-xxxx|Workflow|system_prompt,user_query
+```
+
+在这个示例中：
+- `system_prompt` 将作为系统提示词的变量名
+- `user_query` 将作为用户提示词的变量名
 
 ### 接入方式二：Authorization Header 传递 API_KEY，model 参数传递其他配置
 
@@ -205,11 +218,14 @@ Authorization: Bearer API_KEY
 **`model` 参数格式：**
 
 ```
-"model": "dify|BOT_TYPE|DIFY_API_URL|INPUT_VARIABLE|OUTPUT_VARIABLE"
+"model": "dify|BOT_TYPE|DIFY_API_URL|INPUT_VARIABLE|OUTPUT_VARIABLE|USER"
 ```
 
 - Authorization Header 中只包含 `API_KEY`。
 - 其他配置信息通过请求体中的 `model` 参数传递。
+- **新功能**：`INPUT_VARIABLE` 支持英文逗号分隔，格式为 `SYSTEM_INPUT_VARIABLE,USER_INPUT_VARIABLE`。
+  - 如果包含逗号，则第一个部分作为系统提示词的变量名，第二个部分作为用户提示词的变量名。
+  - 如果不包含逗号，则保持原逻辑，直接作为用户提示词的变量名。
 
 **示例：**
 
@@ -220,6 +236,20 @@ Authorization: Bearer app-xxxx
 ```json
 "model": "dify|Chat|https://cloud.dify.ai/v1"
 ```
+
+**使用逗号分隔的示例：**
+
+```bash
+Authorization: Bearer app-xxxx
+```
+
+```json
+"model": "dify|Workflow|https://cloud.dify.ai/v1|system_prompt,user_query"
+```
+
+在这个示例中：
+- `system_prompt` 将作为系统提示词的变量名
+- `user_query` 将作为用户提示词的变量名
 
 ### 接入方式三：Authorization Header 传递 DIFY_API_URL，model 参数传递其他配置
 
@@ -232,11 +262,14 @@ Authorization: Bearer DIFY_API_URL
 **`model` 参数格式：**
 
 ```
-"model": "dify|API_KEY|BOT_TYPE|INPUT_VARIABLE|OUTPUT_VARIABLE"
+"model": "dify|API_KEY|BOT_TYPE|INPUT_VARIABLE|OUTPUT_VARIABLE|USER"
 ```
 
 - Authorization Header 中只包含 `DIFY_API_URL`。
 - 其他配置信息通过请求体中的 `model` 参数传递。
+- **新功能**：`INPUT_VARIABLE` 支持英文逗号分隔，格式为 `SYSTEM_INPUT_VARIABLE,USER_INPUT_VARIABLE`。
+  - 如果包含逗号，则第一个部分作为系统提示词的变量名，第二个部分作为用户提示词的变量名。
+  - 如果不包含逗号，则保持原逻辑，直接作为用户提示词的变量名。
 
 **示例：**
 
@@ -247,6 +280,63 @@ Authorization: Bearer https://cloud.dify.ai/v1
 ```json
 "model": "dify|app-xxxx|Chat"
 ```
+
+**使用逗号分隔的示例：**
+
+```bash
+Authorization: Bearer https://cloud.dify.ai/v1
+```
+
+```json
+"model": "dify|app-xxxx|Workflow|system_prompt,user_query"
+```
+
+在这个示例中：
+- `system_prompt` 将作为系统提示词的变量名
+- `user_query` 将作为用户提示词的变量名
+
+---
+
+## INPUT_VARIABLE 逗号分隔功能
+
+### 功能说明
+
+从当前版本开始，`INPUT_VARIABLE` 参数支持英文逗号分隔，允许将系统提示词和用户提示词分别传递到不同的变量中。
+
+### 使用方法
+
+在 `INPUT_VARIABLE` 参数中使用英文逗号分隔两个变量名：
+
+```
+INPUT_VARIABLE格式：SYSTEM_INPUT_VARIABLE,USER_INPUT_VARIABLE
+```
+
+- `SYSTEM_INPUT_VARIABLE`：用于接收系统提示词（role为"system"的消息）的变量名
+- `USER_INPUT_VARIABLE`：用于接收用户查询（最后一条非系统消息）的变量名
+
+### 工作原理
+
+1. **有逗号分隔时**：
+   - 系统会自动从消息列表中提取 `role: "system"` 的消息内容
+   - 系统提示词将存储在 `SYSTEM_INPUT_VARIABLE` 指定的变量中
+   - 用户查询将存储在 `USER_INPUT_VARIABLE` 指定的变量中
+
+2. **无逗号分隔时**：
+   - 保持原有逻辑不变
+   - 所有内容（包括系统消息）都会合并到同一个变量中
+
+### 适用场景
+
+这个功能特别适用于：
+- 需要分别处理系统提示和用户输入的 Workflow 应用
+- 希望在 Dify 工作流中对系统提示和用户查询进行不同处理的场景
+- 需要清晰分离系统指令和用户输入的应用
+
+### 注意事项
+
+- 系统消息的 `role` 必须设置为 `"system"`
+- 如果没有系统消息，`SYSTEM_INPUT_VARIABLE` 将不会被设置
+- 逗号前后不要有空格，如果有多余空格会被自动去除
 
 ---
 

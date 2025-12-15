@@ -174,24 +174,128 @@ async function handleRequest(req, res, config, requestId, startTime) {
       }
     }
     
-    // 第二步：从最后一条消息中提取查询文本
-    if (Array.isArray(lastMessage.content)) {
-      for (const content of lastMessage.content) {
-        // 处理字符串类型的内容（OpenAI格式）
-        if (typeof content === "string") {
-          // 将字符串类型的内容设置为输入变量
-          inputs[config.INPUT_VARIABLE || "text_input"] = content;
+    // 第二步：从消息中提取系统提示和用户查询文本
+    let systemPrompt = "";
+    let userQuery = "";
+
+    // 提取系统消息（role为system的消息）
+    for (const message of messages) {
+      if (message.role === "system") {
+        if (Array.isArray(message.content)) {
+          for (const content of message.content) {
+            if (typeof content === "string") {
+              systemPrompt += content + "\n";
+            } else if (content.type === "text") {
+              systemPrompt += content.text + "\n";
+            }
+          }
+        } else {
+          systemPrompt += message.content + "\n";
         }
-        // 处理对象类型的内容
-        else if (content.type === "text") {
-          // 假设文本内容是输入变量，需要根据您的应用逻辑调整
-          inputs[config.INPUT_VARIABLE || "text_input"] = content.text;
-        }
-        // 注意：这里不再重复处理image_url，因为已经在上面处理过了
       }
-    } else {
-      // 假设消息内容是输入变量，需要根据您的应用逻辑调整
-      inputs[config.INPUT_VARIABLE || "text_input"] = lastMessage.content;
+    }
+
+    // 正确提取用户查询文本：扫描所有消息，找到用户文本内容
+    log("info", "开始提取用户查询文本", {
+      requestId,
+      messageCount: messages.length
+    });
+
+    for (let msgIndex = 0; msgIndex < messages.length; msgIndex++) {
+      const message = messages[msgIndex];
+      if (message.role === "user") {
+        if (Array.isArray(message.content)) {
+          for (let i = 0; i < message.content.length; i++) {
+            const content = message.content[i];
+
+            // 处理字符串类型的内容（OpenAI格式）
+            if (typeof content === "string") {
+              userQuery += content + "\n";
+            }
+            // 处理对象类型的内容
+            else if (content && content.type === "text" && typeof content.text === "string") {
+              userQuery += content.text + "\n";
+            }
+            // 处理其他类型的内容（记录但不添加到查询）
+            else {
+              log("warn", "跳过不支持的内容类型", {
+                requestId,
+                messageIndex: msgIndex,
+                contentIndex: i,
+                contentType: typeof content,
+                contentObj: content
+              });
+            }
+            // 注意：这里不再重复处理image_url，因为已经在上面处理过了
+          }
+        } else {
+          // 处理非数组类型的内容
+          if (typeof message.content === "string") {
+            userQuery += message.content + "\n";
+          } else {
+            log("warn", "不支持的 content 类型", {
+              requestId,
+              messageIndex: msgIndex,
+              contentType: typeof message.content,
+              content: message.content
+            });
+            userQuery += String(message.content) + "\n";
+            log("debug", "转换为字符串并添加到 userQuery", {
+              requestId,
+              messageIndex: msgIndex,
+              convertedContent: String(message.content),
+              currentQuery: userQuery
+            });
+          }
+        }
+      }
+    }
+    userQuery = userQuery.trim(); // 去除末尾的换行符
+
+    log("info", "完成用户查询文本提取", {
+      requestId,
+      finalUserQuery: userQuery,
+      queryLength: userQuery.length,
+      isEmpty: !userQuery || userQuery.trim().length === 0
+    });
+
+    // 设置输入变量
+    systemPrompt = systemPrompt.trim();
+    userQuery = userQuery.trim();
+
+    // 如果存在 SYSTEM_INPUT_VARIABLE，则分别设置系统提示和用户查询
+    if (config.SYSTEM_INPUT_VARIABLE && systemPrompt) {
+      inputs[config.SYSTEM_INPUT_VARIABLE] = systemPrompt;
+      log("debug", "设置系统提示", {
+        requestId,
+        systemInputKey: config.SYSTEM_INPUT_VARIABLE,
+        systemPrompt
+      });
+    }
+
+    // 设置用户查询
+    const inputVariable = config.INPUT_VARIABLE || "text_input";
+    inputs[inputVariable] = userQuery;
+
+    log("info", "设置用户查询到 inputs", {
+      requestId,
+      inputVariable,
+      userQuery: userQuery,
+      userQueryLength: userQuery.length,
+      inputsAfterUserQuery: inputs
+    });
+
+    // 如果没有分离的系统提示词，但有系统消息，则将其添加到用户查询前面
+    if (!config.SYSTEM_INPUT_VARIABLE && systemPrompt) {
+      inputs[inputVariable] = systemPrompt + "\n\n" + userQuery;
+      log("info", "合并系统提示和用户查询", {
+        requestId,
+        inputVariable,
+        systemPrompt,
+        userQuery,
+        finalInput: inputs[inputVariable],
+        inputsAfterMerge: inputs
+      });
     }
 
     // 日志记录
