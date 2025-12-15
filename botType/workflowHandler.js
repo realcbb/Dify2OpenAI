@@ -217,15 +217,15 @@ async function handleRequest(req, res, config, requestId, startTime) {
               userQuery += content.text + "\n";
             }
             // 处理其他类型的内容（记录但不添加到查询）
-            else {
-              log("warn", "跳过不支持的内容类型", {
-                requestId,
-                messageIndex: msgIndex,
-                contentIndex: i,
-                contentType: typeof content,
-                contentObj: content
-              });
-            }
+            // else {
+            //   log("warn", "跳过不支持的内容类型", {
+            //     requestId,
+            //     messageIndex: msgIndex,
+            //     contentIndex: i,
+            //     contentType: typeof content,
+            //     contentObj: content
+            //   });
+            // }
             // 注意：这里不再重复处理image_url，因为已经在上面处理过了
           }
         } else {
@@ -233,12 +233,12 @@ async function handleRequest(req, res, config, requestId, startTime) {
           if (typeof message.content === "string") {
             userQuery += message.content + "\n";
           } else {
-            log("warn", "不支持的 content 类型", {
-              requestId,
-              messageIndex: msgIndex,
-              contentType: typeof message.content,
-              content: message.content
-            });
+            // log("warn", "不支持的 content 类型", {
+            //   requestId,
+            //   messageIndex: msgIndex,
+            //   contentType: typeof message.content,
+            //   content: message.content
+            // });
             userQuery += String(message.content) + "\n";
             log("debug", "转换为字符串并添加到 userQuery", {
               requestId,
